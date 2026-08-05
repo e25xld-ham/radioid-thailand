@@ -9,67 +9,97 @@
 </head>
 <body>
 <div class="page">
-
-  <header class="site-header">
-    <div class="minimal-mark" aria-hidden="true">520</div>
-    <div class="minimal-heading">
-      <div class="eyebrow">THAILAND DMR ID EXPORT TOOL</div>
-      <h1>Thai RadioID Downloader</h1>
-      <p class="release-line">Release 2026.08</p>
-      <p class="header-subtitle">ดาวน์โหลดรายชื่อ DMR ID ประเทศไทยล่าสุดจาก RadioID.net</p>
+  <header class="hero">
+    <div class="hero-topline">
+      <div class="brand-chip">520</div>
+      <div class="worker-mini" id="worker-mini" data-state="checking">
+        <span class="worker-dot"></span>
+        <div><strong id="worker-mini-label">CHECKING</strong><span>Cloudflare Worker</span></div>
+      </div>
     </div>
+
+    <div class="hero-copy">
+      <p class="eyebrow">THAILAND DMR DATABASE EXPORT TOOL</p>
+      <h1>Thai RadioID <span>Downloader</span></h1>
+      <p class="hero-subtitle">ดาวน์โหลดรายชื่อ DMR ID ประเทศไทยล่าสุดจาก RadioID.net</p>
+      <p class="release-badge">Release 2026.08</p>
+    </div>
+
+    <section class="hero-actions" aria-label="การดำเนินการหลัก">
+      <button type="button" class="action-card action-primary" id="fetch-btn">
+        <span class="action-icon" aria-hidden="true">↓</span>
+        <span><strong>ดึงข้อมูลล่าสุด</strong><small>Fetch Latest Database</small></span>
+      </button>
+      <button type="button" class="action-card action-secondary" id="download-btn" disabled>
+        <span class="action-icon" aria-hidden="true">⇩</span>
+        <span><strong>ดาวน์โหลด CSV</strong><small>Download CSV File</small></span>
+      </button>
+    </section>
   </header>
 
   <main>
-
-    <section class="card" aria-labelledby="info-heading">
-      <h2 id="info-heading">เกี่ยวกับข้อมูล</h2>
-      <dl class="info-list">
-        <div class="info-row">
-          <dt>แหล่งข้อมูล</dt>
-          <dd><a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a> (user.csv)</dd>
-        </div>
-        <div class="info-row">
-          <dt>เงื่อนไขการกรอง</dt>
-          <dd>DMR ID ที่ขึ้นต้นด้วย <code>520</code> (ประเทศไทย) เท่านั้น</dd>
-        </div>
-        <div class="info-row">
-          <dt>เวลาในการดึงข้อมูล</dt>
-          <dd>ระบบจะดึงข้อมูลจาก RadioID.net ก็ต่อเมื่อผู้ใช้กดปุ่ม "ดึงข้อมูลล่าสุด" เท่านั้น — ไม่ดึงข้อมูลอัตโนมัติเมื่อเปิดหน้านี้</dd>
-        </div>
-        <div class="info-row">
-          <dt>การจัดเก็บข้อมูล</dt>
-          <dd>เว็บไซต์นี้<strong>ไม่เก็บรายชื่อไว้ถาวร</strong> ข้อมูลถูกประมวลผลชั่วคราวที่ Cloudflare Worker และแคชไว้ไม่เกิน 30 นาที</dd>
-        </div>
-      </dl>
+    <section class="stats-grid" aria-label="สถิติฐานข้อมูล">
+      <article class="stat-card stat-teal">
+        <span class="stat-icon" aria-hidden="true">◎</span>
+        <p>THAILAND IDS</p>
+        <strong id="stat-count">—</strong>
+        <small>รายการ</small>
+      </article>
+      <article class="stat-card stat-blue">
+        <span class="stat-icon" aria-hidden="true">◷</span>
+        <p>LAST UPDATE</p>
+        <strong id="stat-date">—</strong>
+        <small id="stat-time">กดดึงข้อมูลล่าสุด</small>
+      </article>
+      <article class="stat-card stat-purple">
+        <span class="stat-icon" aria-hidden="true">◉</span>
+        <p>SOURCE</p>
+        <strong>RadioID.net</strong>
+        <small>user.csv</small>
+      </article>
+      <article class="stat-card stat-green">
+        <span class="stat-icon" aria-hidden="true">◇</span>
+        <p>CACHE</p>
+        <strong>30 Minutes</strong>
+        <small>Cloudflare Worker</small>
+      </article>
     </section>
 
-    <section class="card status-card" aria-labelledby="status-heading">
-      <h2 id="status-heading">สถานะการทำงาน</h2>
+    <section class="dashboard-grid">
+      <section class="panel info-panel" aria-labelledby="info-heading">
+        <h2 id="info-heading">เกี่ยวกับข้อมูล</h2>
+        <dl class="info-list">
+          <div><dt>แหล่งข้อมูล</dt><dd><a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a> (user.csv)</dd></div>
+          <div><dt>เงื่อนไขการกรอง</dt><dd>DMR ID ที่ขึ้นต้นด้วย <code>520</code> (ประเทศไทย)</dd></div>
+          <div><dt>เวลาในการดึงข้อมูล</dt><dd>ระบบจะดึงข้อมูลเมื่อผู้ใช้กดปุ่ม “ดึงข้อมูลล่าสุด” เท่านั้น</dd></div>
+          <div><dt>การจัดเก็บข้อมูล</dt><dd>ไม่เก็บรายชื่อถาวร ประมวลผลชั่วคราวและแคชไม่เกิน 30 นาที</dd></div>
+        </dl>
+      </section>
 
-      <p class="connection-status" id="connection-status" data-state="checking">กำลังตรวจสอบการเชื่อมต่อ Worker...</p>
+      <section class="panel status-panel" aria-labelledby="status-heading">
+        <h2 id="status-heading">สถานะการทำงาน</h2>
+        <p class="connection-status" id="connection-status" data-state="checking">กำลังตรวจสอบการเชื่อมต่อ Worker...</p>
+        <p class="status-live" id="status-live" role="status" aria-live="polite"></p>
+        <progress class="progress-bar" id="progress" hidden></progress>
 
-      <p class="status-live" id="status-live" role="status" aria-live="polite"></p>
+        <div class="result-summary" id="result-summary" role="status" aria-live="polite" hidden>
+          <p class="result-count" id="result-count"></p>
+          <p class="result-time" id="result-time"></p>
+        </div>
 
-      <progress class="progress-bar" id="progress" hidden></progress>
+        <div class="error-banner" id="error-banner" role="alert" hidden>
+          <p class="error-message" id="error-message"></p>
+          <button type="button" class="btn-secondary" id="retry-btn">ลองใหม่อีกครั้ง</button>
+        </div>
 
-      <div class="result-summary" id="result-summary" role="status" aria-live="polite" hidden>
-        <p class="result-count" id="result-count"></p>
-        <p class="result-time" id="result-time"></p>
-      </div>
-
-      <div class="error-banner" id="error-banner" role="alert" hidden>
-        <p class="error-message" id="error-message"></p>
-        <button type="button" class="btn btn-secondary" id="retry-btn">ลองใหม่อีกครั้ง</button>
-      </div>
+        <div class="endpoint-box">
+          <span>Endpoint</span>
+          <code>radioid-thailand-api.e25xld.workers.dev</code>
+        </div>
+      </section>
     </section>
 
-    <section class="actions" aria-label="การดำเนินการ">
-      <button type="button" class="btn btn-primary" id="fetch-btn">ดึงข้อมูลล่าสุด</button>
-      <button type="button" class="btn btn-accent" id="download-btn" disabled>ดาวน์โหลด CSV รายชื่อไทยทั้งหมด</button>
-    </section>
-
-    <section class="card sample-section" id="sample-section" aria-labelledby="sample-heading" hidden>
+    <section class="panel sample-section" id="sample-section" aria-labelledby="sample-heading" hidden>
       <h2 id="sample-heading">ตัวอย่างข้อมูล (สูงสุด 10 รายการแรก)</h2>
       <div class="table-scroll">
         <table class="sample-table">
@@ -78,26 +108,15 @@
         </table>
       </div>
     </section>
-
   </main>
 
   <footer class="site-footer">
-    <p class="footer-credit">
-      <img src="assets/flags/th.svg" alt="Thailand" class="flag-icon" width="20" height="15" loading="lazy">
-      <span>Designed &amp; Developed by <strong>E25XLD</strong> (also <strong>KE9CYN</strong>)</span>
-      <img src="assets/flags/us.svg" alt="United States" class="flag-icon" width="20" height="15" loading="lazy">
-    </p>
-    <p>
-      Data courtesy of <a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a>
-    </p>
+    <p>Designed &amp; Developed by <strong>E25XLD</strong> (also <strong>KE9CYN</strong>)</p>
+    <p>Data courtesy of <a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a></p>
     <p>This website is not affiliated with RadioID.net.</p>
-    <p>
-      <a href="https://github.com/e25xld-ham/radioid-thailand" target="_blank" rel="noopener noreferrer">Source Code on GitHub</a>
-    </p>
+    <p><a href="https://github.com/e25xld-ham/radioid-thailand" target="_blank" rel="noopener noreferrer">Source Code on GitHub</a></p>
   </footer>
-
 </div>
-
 <script type="module" src="assets/app.js"></script>
 </body>
 </html>
