@@ -394,6 +394,12 @@ a:focus-visible {
   margin: 6px 0;
 }
 
+/* Higher specificity than ".site-footer p" (0,1,1) so the extra top margin
+   isn't silently dropped by the more general sibling-paragraph rule above. */
+.site-footer .footer-credit {
+  margin-top: 12px;
+}
+
 /* ---------- Responsive tweaks ---------- */
 
 @media (min-width: 640px) {
