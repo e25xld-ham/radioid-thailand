@@ -398,6 +398,22 @@ a:focus-visible {
    isn't silently dropped by the more general sibling-paragraph rule above. */
 .site-footer .footer-credit {
   margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flag-icon {
+  width: 20px;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  flex-shrink: 0;
+  border-radius: 2px;
+  /* Both flags are fully opaque already; the hairline border is purely to
+     keep their near-white regions from blending into the dark page edge. */
+  border: 1px solid var(--border);
 }
 
 /* ---------- Responsive tweaks ---------- */
