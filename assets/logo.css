@@ -1,0 +1,82 @@
+/* Branded header for Thai RadioID Downloader */
+.site-header {
+  display: block;
+  padding: 4px 0 26px;
+}
+
+.brand-logo {
+  display: block;
+  width: 100%;
+}
+
+.site-logo {
+  display: block;
+  width: min(100%, 720px);
+  height: auto;
+  margin: 0 auto;
+  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.42));
+}
+
+.release-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: -10px;
+  text-align: center;
+}
+
+.release-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid rgba(45, 212, 200, 0.55);
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(45, 212, 200, 0.08);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  box-shadow: 0 0 18px rgba(45, 212, 200, 0.12);
+}
+
+.release-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 520px) {
+  .site-header {
+    padding-bottom: 20px;
+  }
+
+  .site-logo {
+    width: 112%;
+    max-width: none;
+    margin-left: -6%;
+  }
+
+  .release-row {
+    margin-top: -2px;
+  }
+
+  .release-subtitle {
+    flex-basis: 100%;
+    font-size: 0.84rem;
+  }
+}
