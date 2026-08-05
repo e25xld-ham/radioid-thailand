@@ -3,7 +3,7 @@
  *
  * Endpoints:
  *   GET  /api/status   - health check only, never touches upstream
- *   GET  /api/fetch     - fetches RadioID.net user.csv, filters Thai (520) records, caches 5 min
+ *   GET  /api/fetch     - fetches RadioID.net user.csv, filters Thai (520) records, caches 30 min
  *   GET  /api/download - streams the filtered dataset back as a single CSV file
  *
  * This file is written so its pure logic (CSV parsing, filtering, dedupe,
@@ -18,13 +18,17 @@
 // ---------------------------------------------------------------------------
 
 const UPSTREAM_HOST = 'radioid.net';
-const UPSTREAM_URL = 'https://radioid.net/static/user.csv';
+const UPSTREAM_PROTOCOL = 'https:';
+const UPSTREAM_PATH = '/static/user.csv';
+const UPSTREAM_URL = `${UPSTREAM_PROTOCOL}//${UPSTREAM_HOST}${UPSTREAM_PATH}`;
 const FILTER_PREFIX = '520';
 const SERVICE_NAME = 'Thai RadioID Downloader';
 
-const UPSTREAM_TIMEOUT_MS = 35000; // within the required 30-45s window
+const UPSTREAM_TIMEOUT_MS = 45000; // required 45s window
+const MIN_UPSTREAM_BYTES = 1024; // a real RadioID export is always far larger than this
 const MAX_UPSTREAM_BYTES = 150 * 1024 * 1024; // sanity ceiling against abnormal upstream responses
-const EDGE_CACHE_TTL_SECONDS = 300; // 5 minutes, temporary only — not a database
+const EDGE_CACHE_TTL_SECONDS = 1800; // 30 minutes, temporary only — not a database
+const FETCH_COOLDOWN_MS = 20000; // isolate-local guard against rapid re-fetch bursts on a cache miss
 const DEFAULT_ALLOWED_ORIGIN = 'https://e25xld-ham.github.io';
 const CACHE_URL = 'https://cache.internal.radioid-thailand.invalid/latest-thai-dataset';
 
@@ -267,7 +271,7 @@ async function readTextWithLimit(response, maxBytes) {
   if (!response.body || typeof response.body.getReader !== 'function') {
     const buf = await response.arrayBuffer();
     if (buf.byteLength > maxBytes) {
-      throw new UpstreamError('TOO_LARGE', 'ไฟล์ต้นฉบับมีขนาดใหญ่เกินกำหนด');
+      throw new UpstreamError('UPSTREAM_TOO_LARGE', 'ไฟล์ต้นฉบับมีขนาดใหญ่เกินกำหนด');
     }
     return { text: new TextDecoder('utf-8').decode(buf), byteSize: buf.byteLength };
   }
@@ -282,7 +286,7 @@ async function readTextWithLimit(response, maxBytes) {
     total += value.byteLength;
     if (total > maxBytes) {
       await reader.cancel().catch(() => {});
-      throw new UpstreamError('TOO_LARGE', 'ไฟล์ต้นฉบับมีขนาดใหญ่เกินกำหนด');
+      throw new UpstreamError('UPSTREAM_TOO_LARGE', 'ไฟล์ต้นฉบับมีขนาดใหญ่เกินกำหนด');
     }
     text += decoder.decode(value, { stream: true });
   }
@@ -312,49 +316,61 @@ export async function fetchAndFilterThai(fetchImpl = fetch) {
     response = await fetchImpl(url, {
       method: 'GET',
       cache: 'no-store',
+      redirect: 'follow',
       signal: controller.signal,
       headers: {
-        'User-Agent': 'radioid-thailand-worker (+https://github.com/e25xld-ham/radioid-thailand)',
-        Accept: 'text/csv, text/plain, */*',
+        Accept: 'text/csv,text/plain;q=0.9,*/*;q=0.1',
+        // Cloudflare Workers' server-side fetch() permits a custom User-Agent
+        // (unlike browser fetch(), which forbids it) — set both this and a
+        // dedicated identifying header as a defensive fallback in case a
+        // future runtime restricts the former.
+        'User-Agent': 'Thai-RadioID-Downloader/1.0 (E25XLD; GitHub: e25xld-ham/radioid-thailand)',
+        'X-Client-Name': 'Thai-RadioID-Downloader',
       },
     });
   } catch (err) {
     if (err && err.name === 'AbortError') {
-      throw new UpstreamError('TIMEOUT', 'การเชื่อมต่อไปยัง RadioID.net หมดเวลา กรุณาลองใหม่อีกครั้ง');
+      throw new UpstreamError('UPSTREAM_TIMEOUT', 'ไม่สามารถดาวน์โหลดฐานข้อมูล RadioID ได้ภายในเวลาที่กำหนด');
     }
-    throw new UpstreamError('NETWORK_ERROR', 'ไม่สามารถเชื่อมต่อไปยัง RadioID.net ได้ กรุณาลองใหม่อีกครั้งภายหลัง');
+    throw new UpstreamError('UPSTREAM_NETWORK_ERROR', 'ไม่สามารถเชื่อมต่อไปยัง RadioID.net ได้ กรุณาลองใหม่อีกครั้งภายหลัง');
   } finally {
     clearTimeout(timer);
   }
 
   if (response.status !== 200) {
-    throw new UpstreamError('BAD_STATUS', `RadioID.net ตอบกลับสถานะ HTTP ${response.status}`, {
+    throw new UpstreamError('UPSTREAM_BAD_STATUS', `RadioID.net ตอบกลับสถานะ HTTP ${response.status}`, {
       status: response.status,
     });
   }
 
   const contentType = (response.headers.get('content-type') || '').toLowerCase();
-  if (contentType.includes('text/html')) {
-    throw new UpstreamError('HTML_RESPONSE', 'RadioID.net ส่งข้อมูลกลับมาผิดรูปแบบ (คาดว่าเป็นหน้า error)');
+  if (contentType.includes('text/html') || contentType.includes('application/json')) {
+    throw new UpstreamError('UPSTREAM_HTML_RESPONSE', 'RadioID.net ส่งข้อมูลกลับมาผิดรูปแบบ (คาดว่าเป็นหน้า error)');
   }
 
   const declaredLength = Number(response.headers.get('content-length') || 0);
   if (declaredLength > MAX_UPSTREAM_BYTES) {
-    throw new UpstreamError('TOO_LARGE', 'ไฟล์ต้นฉบับมีขนาดใหญ่เกินกำหนด');
+    throw new UpstreamError('UPSTREAM_TOO_LARGE', 'ไฟล์ต้นฉบับมีขนาดใหญ่เกินกำหนด');
+  }
+  if (declaredLength > 0 && declaredLength < MIN_UPSTREAM_BYTES) {
+    throw new UpstreamError('UPSTREAM_TOO_SMALL', 'ไฟล์ต้นฉบับมีขนาดเล็กผิดปกติ อาจไม่ใช่ข้อมูลที่ถูกต้อง');
   }
 
   const { text, byteSize } = await readTextWithLimit(response, MAX_UPSTREAM_BYTES);
 
   if (!text || text.trim().length === 0) {
-    throw new UpstreamError('EMPTY_RESPONSE', 'RadioID.net ส่งข้อมูลว่างกลับมา กรุณาลองใหม่อีกครั้ง');
+    throw new UpstreamError('UPSTREAM_EMPTY_RESPONSE', 'RadioID.net ส่งข้อมูลว่างกลับมา กรุณาลองใหม่อีกครั้ง');
+  }
+  if (byteSize < MIN_UPSTREAM_BYTES) {
+    throw new UpstreamError('UPSTREAM_TOO_SMALL', 'ไฟล์ต้นฉบับมีขนาดเล็กผิดปกติ อาจไม่ใช่ข้อมูลที่ถูกต้อง');
   }
   if (looksLikeHtml(text)) {
-    throw new UpstreamError('HTML_RESPONSE', 'RadioID.net ส่งข้อมูลกลับมาผิดรูปแบบ (คาดว่าเป็นหน้า error)');
+    throw new UpstreamError('UPSTREAM_HTML_RESPONSE', 'RadioID.net ส่งข้อมูลกลับมาผิดรูปแบบ (คาดว่าเป็นหน้า error)');
   }
 
   const { headers, rows } = parseCSV(text);
   if (headers.length === 0) {
-    throw new UpstreamError('PARSE_ERROR', 'ไม่สามารถอ่านโครงสร้างไฟล์ CSV จาก RadioID.net ได้');
+    throw new UpstreamError('UPSTREAM_PARSE_ERROR', 'ไม่สามารถอ่านโครงสร้างไฟล์ CSV จาก RadioID.net ได้');
   }
 
   let filtered;
@@ -362,9 +378,9 @@ export async function fetchAndFilterThai(fetchImpl = fetch) {
     filtered = filterDedupeSortThai(headers, rows);
   } catch (err) {
     if (err && err.code === 'MISSING_COLUMN') {
-      throw new UpstreamError('MISSING_COLUMN', 'ไม่พบคอลัมน์ RADIO_ID ในไฟล์ต้นฉบับ');
+      throw new UpstreamError('UPSTREAM_MISSING_COLUMN', 'ไม่พบคอลัมน์ RADIO_ID ในไฟล์ต้นฉบับ');
     }
-    throw new UpstreamError('PARSE_ERROR', 'ประมวลผลไฟล์ CSV จาก RadioID.net ไม่สำเร็จ');
+    throw new UpstreamError('UPSTREAM_PARSE_ERROR', 'ประมวลผลไฟล์ CSV จาก RadioID.net ไม่สำเร็จ');
   }
 
   const lastModifiedHeader = response.headers.get('last-modified');
@@ -419,17 +435,23 @@ function securityHeaders() {
     'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    // "cross-origin" (not "same-origin") is required here — GitHub Pages and
+    // the Worker are different origins by design, and a stricter value would
+    // let the CORS headers below pass while still having the browser block
+    // the response at the CORP layer.
+    'Cross-Origin-Resource-Policy': 'cross-origin',
   };
 }
 
 function corsHeaders(allowedOrigin) {
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Expose-Headers': 'Content-Disposition, X-Cache-Status',
     Vary: 'Origin',
   };
 }
 
-function jsonResponse(payload, status, allowedOrigin) {
+function jsonResponse(payload, status, allowedOrigin, extraHeaders = {}) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {
@@ -437,8 +459,14 @@ function jsonResponse(payload, status, allowedOrigin) {
       ...corsHeaders(allowedOrigin),
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
+      ...extraHeaders,
     },
   });
+}
+
+/** Constant JSON error shape: { ok: false, error: { code, message } }. Never includes a stack trace. */
+function jsonError(code, message, status, allowedOrigin, extraHeaders = {}) {
+  return jsonResponse({ ok: false, error: { code, message } }, status, allowedOrigin, extraHeaders);
 }
 
 /** Only logs operational metadata — never person-identifying CSV content. */
@@ -451,35 +479,33 @@ function logEvent(fields) {
 }
 
 const UPSTREAM_ERROR_STATUS = {
-  TIMEOUT: 504,
-  NETWORK_ERROR: 502,
-  BAD_STATUS: 502,
-  HTML_RESPONSE: 502,
-  TOO_LARGE: 502,
-  EMPTY_RESPONSE: 502,
-  READ_ERROR: 502,
-  PARSE_ERROR: 502,
-  MISSING_COLUMN: 502,
+  UPSTREAM_TIMEOUT: 504,
+  UPSTREAM_NETWORK_ERROR: 502,
+  UPSTREAM_BAD_STATUS: 502,
+  UPSTREAM_HTML_RESPONSE: 502,
+  UPSTREAM_TOO_LARGE: 502,
+  UPSTREAM_TOO_SMALL: 502,
+  UPSTREAM_EMPTY_RESPONSE: 502,
+  UPSTREAM_PARSE_ERROR: 502,
+  UPSTREAM_MISSING_COLUMN: 502,
 };
 
 function errorResponse(err, allowedOrigin) {
   if (err instanceof UpstreamError) {
     const status = UPSTREAM_ERROR_STATUS[err.code] || 502;
-    logEvent({ endpoint: 'error', status, errorCode: err.code });
-    return jsonResponse({ ok: false, error: err.code, message: err.message }, status, allowedOrigin);
+    logEvent({ endpoint: 'error', status, errorClass: err.code });
+    return jsonError(err.code, err.message, status, allowedOrigin);
   }
-  logEvent({ endpoint: 'error', status: 500, errorCode: 'INTERNAL_ERROR', detail: String((err && err.message) || err) });
-  return jsonResponse(
-    { ok: false, error: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาดที่ไม่คาดคิดฝั่งเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง' },
-    500,
-    allowedOrigin,
-  );
+  logEvent({ endpoint: 'error', status: 500, errorClass: 'INTERNAL_ERROR' });
+  return jsonError('INTERNAL_ERROR', 'เกิดข้อผิดพลาดที่ไม่คาดคิดฝั่งเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง', 500, allowedOrigin);
 }
 
 // ---------------------------------------------------------------------------
-// Edge cache (Cache API) — temporary only, max 5 minutes, not a database.
+// Edge cache (Cache API) — temporary only, max 30 minutes, not a database.
 // Falls back to "no cache" transparently when the Cache API isn't available
-// (e.g. running under plain Node for tests).
+// (e.g. running under plain Node for tests). The cache key is a fixed,
+// synthetic URL — never derived from the upstream cache-busting timestamp —
+// so /api/fetch and /api/download always share the same prepared result.
 // ---------------------------------------------------------------------------
 
 function getEdgeCache() {
@@ -524,9 +550,13 @@ function writeCache(ctx, data) {
 // single upstream fetch, so a user double-clicking (or two tabs) while a
 // request is already in flight doesn't trigger duplicate RadioID.net hits.
 let inFlightFetch = null;
+// Isolate-local timestamp of the last upstream fetch *start*, used only for
+// the /api/fetch cooldown below — not a substitute for the edge cache.
+let lastUpstreamFetchStartedAt = 0;
 
 function fetchThaiOnce() {
   if (!inFlightFetch) {
+    lastUpstreamFetchStartedAt = Date.now();
     inFlightFetch = fetchAndFilterThai().finally(() => {
       inFlightFetch = null;
     });
@@ -534,12 +564,18 @@ function fetchThaiOnce() {
   return inFlightFetch;
 }
 
-/** Gets the current Thai dataset from cache, or fetches+filters fresh from upstream. */
-async function getThaiDataset(ctx) {
-  const cached = await readCache();
-  if (cached) {
-    return { data: cached, cacheHit: true };
-  }
+function withinFetchCooldown() {
+  if (lastUpstreamFetchStartedAt === 0) return false;
+  return Date.now() - lastUpstreamFetchStartedAt < FETCH_COOLDOWN_MS;
+}
+
+function fetchCooldownRemainingSeconds() {
+  const remainingMs = FETCH_COOLDOWN_MS - (Date.now() - lastUpstreamFetchStartedAt);
+  return Math.max(1, Math.ceil(remainingMs / 1000));
+}
+
+/** Fetches fresh data from upstream, writes it to the edge cache, and logs (no personal data). */
+async function fetchFreshAndCache(ctx) {
   const result = await fetchThaiOnce();
   const data = {
     headers: result.headers,
@@ -554,10 +590,20 @@ async function getThaiDataset(ctx) {
     endpoint: 'fetch-upstream',
     status: 200,
     byteSize: result.byteSize,
-    count: result.count,
-    duplicateCount: result.duplicateCount,
     totalUpstreamRows: result.totalUpstreamRows,
+    thaiRowCount: result.count,
+    duplicateCount: result.duplicateCount,
   });
+  return data;
+}
+
+/** Gets the current Thai dataset from cache, or fetches+filters fresh from upstream. */
+async function getThaiDataset(ctx) {
+  const cached = await readCache();
+  if (cached) {
+    return { data: cached, cacheHit: true };
+  }
+  const data = await fetchFreshAndCache(ctx);
   return { data, cacheHit: false };
 }
 
@@ -579,31 +625,56 @@ function handleStatus(allowedOrigin) {
   );
 }
 
-async function handleFetch(ctx, allowedOrigin) {
-  const { data, cacheHit } = await getThaiDataset(ctx);
-  logEvent({ endpoint: 'fetch', status: 200, cacheHit, count: data.count });
-  return jsonResponse(
-    {
-      ok: true,
-      count: data.count,
-      duplicateCount: data.duplicateCount,
-      sourceUpdatedAt: data.sourceUpdatedAt,
-      fetchedAt: data.fetchedAt,
-      downloadUrl: '/api/download',
-      columns: data.headers,
-      sample: data.rows.slice(0, 10),
-    },
-    200,
-    allowedOrigin,
-  );
+function toFetchSummary(data) {
+  return {
+    ok: true,
+    count: data.count,
+    duplicateCount: data.duplicateCount,
+    sourceUpdatedAt: data.sourceUpdatedAt,
+    fetchedAt: data.fetchedAt,
+    downloadUrl: '/api/download',
+    columns: data.headers,
+    sample: data.rows.slice(0, 10),
+  };
 }
 
-async function handleDownload(ctx, allowedOrigin) {
-  const { data } = await getThaiDataset(ctx);
+async function handleFetch(ctx, allowedOrigin, startedAt) {
+  const cached = await readCache();
+  if (cached) {
+    logEvent({ endpoint: 'fetch', status: 200, cacheHit: true, thaiRowCount: cached.count, elapsedMs: Date.now() - startedAt });
+    return jsonResponse(toFetchSummary(cached), 200, allowedOrigin, { 'X-Cache-Status': 'HIT' });
+  }
+
+  if (!inFlightFetch && withinFetchCooldown()) {
+    const retryAfterSeconds = fetchCooldownRemainingSeconds();
+    logEvent({ endpoint: 'fetch', status: 429, retryAfterSeconds });
+    return jsonError(
+      'RATE_LIMITED',
+      `กำลังดึงข้อมูลบ่อยเกินไป กรุณารอ ${retryAfterSeconds} วินาทีแล้วลองใหม่อีกครั้ง`,
+      429,
+      allowedOrigin,
+      { 'Retry-After': String(retryAfterSeconds), 'X-Cache-Status': 'MISS' },
+    );
+  }
+
+  const data = await fetchFreshAndCache(ctx);
+  logEvent({ endpoint: 'fetch', status: 200, cacheHit: false, thaiRowCount: data.count, elapsedMs: Date.now() - startedAt });
+  return jsonResponse(toFetchSummary(data), 200, allowedOrigin, { 'X-Cache-Status': 'MISS' });
+}
+
+async function handleDownload(ctx, allowedOrigin, startedAt) {
+  const { data, cacheHit } = await getThaiDataset(ctx);
   const csv = buildCSV(data.headers, data.rows);
   const filename = `radioid_thailand_520_${formatBangkokDate()}.csv`;
 
-  logEvent({ endpoint: 'download', status: 200, count: data.count, byteSize: csv.length });
+  logEvent({
+    endpoint: 'download',
+    status: 200,
+    cacheHit,
+    thaiRowCount: data.count,
+    byteSize: csv.length,
+    elapsedMs: Date.now() - startedAt,
+  });
 
   return new Response(csv, {
     status: 200,
@@ -613,10 +684,7 @@ async function handleDownload(ctx, allowedOrigin) {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'no-store',
-      // Cross-origin fetch() hides response headers from JS by default except
-      // a small "simple" set — Content-Disposition must be explicitly exposed
-      // or the frontend's filename extraction silently falls back to generic.
-      'Access-Control-Expose-Headers': 'Content-Disposition',
+      'X-Cache-Status': cacheHit ? 'HIT' : 'MISS',
     },
   });
 }
@@ -635,15 +703,11 @@ function handleOptions(allowedOrigin) {
 }
 
 function handleNotFound(allowedOrigin) {
-  return jsonResponse({ ok: false, error: 'NOT_FOUND', message: 'ไม่พบ endpoint ที่ร้องขอ' }, 404, allowedOrigin);
+  return jsonError('NOT_FOUND', 'ไม่พบ endpoint ที่ร้องขอ', 404, allowedOrigin);
 }
 
 function handleMethodNotAllowed(allowedOrigin) {
-  return jsonResponse(
-    { ok: false, error: 'METHOD_NOT_ALLOWED', message: 'รองรับเฉพาะ GET และ OPTIONS เท่านั้น' },
-    405,
-    allowedOrigin,
-  );
+  return jsonError('METHOD_NOT_ALLOWED', 'รองรับเฉพาะ GET และ OPTIONS เท่านั้น', 405, allowedOrigin);
 }
 
 // ---------------------------------------------------------------------------
@@ -651,6 +715,7 @@ function handleMethodNotAllowed(allowedOrigin) {
 // ---------------------------------------------------------------------------
 
 export async function handleRequest(request, env, ctx) {
+  const startedAt = Date.now();
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
   const allowedOrigin = resolveAllowedOrigin(origin, env);
@@ -668,10 +733,10 @@ export async function handleRequest(request, env, ctx) {
       return handleStatus(allowedOrigin);
     }
     if (url.pathname === '/api/fetch') {
-      return await handleFetch(ctx, allowedOrigin);
+      return await handleFetch(ctx, allowedOrigin, startedAt);
     }
     if (url.pathname === '/api/download') {
-      return await handleDownload(ctx, allowedOrigin);
+      return await handleDownload(ctx, allowedOrigin, startedAt);
     }
     return handleNotFound(allowedOrigin);
   } catch (err) {
@@ -686,11 +751,27 @@ export default {
 };
 
 // Exported for tests / documentation purposes only.
+/**
+ * Resets isolate-local mutable state (in-flight promise, cooldown clock).
+ * Test-only: production code never calls this — a real isolate's state is
+ * meant to persist for its lifetime. Without this, sequential tests in the
+ * same process would trip each other's /api/fetch cooldown.
+ */
+function resetForTests() {
+  inFlightFetch = null;
+  lastUpstreamFetchStartedAt = 0;
+}
+
 export const __internal = {
   UPSTREAM_HOST,
+  UPSTREAM_PROTOCOL,
+  UPSTREAM_PATH,
   UPSTREAM_URL,
   FILTER_PREFIX,
+  MIN_UPSTREAM_BYTES,
   MAX_UPSTREAM_BYTES,
   EDGE_CACHE_TTL_SECONDS,
+  FETCH_COOLDOWN_MS,
   DEFAULT_ALLOWED_ORIGIN,
+  resetForTests,
 };
