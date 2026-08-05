@@ -1,0 +1,16 @@
+{
+  "name": "radioid-thailand-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker API for Thai RadioID Downloader — fetches, filters, and serves DMR IDs starting with 520 from RadioID.net.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'test/**/*.test.js'",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "node --check src/index.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

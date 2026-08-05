@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Thai RadioID Downloader</title>
+<meta name="description" content="ดาวน์โหลดรายชื่อ DMR ID ประเทศไทยล่าสุดจาก RadioID.net เฉพาะหมายเลขที่ขึ้นต้นด้วย 520 เป็นไฟล์ CSV เดียว" />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="page">
+
+  <header class="site-header">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" width="36" height="36" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="16" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M7.5 11.5a6.5 6.5 0 0 1 9 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M4.5 8.5a10.8 10.8 0 0 1 15 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.6"/>
+        <path d="M12 3.2v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1>Thai RadioID Downloader</h1>
+        <p class="tagline">ดาวน์โหลดรายชื่อ DMR ID ประเทศไทยล่าสุดจาก RadioID.net</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <section class="card" aria-labelledby="info-heading">
+      <h2 id="info-heading">เกี่ยวกับข้อมูล</h2>
+      <dl class="info-list">
+        <div class="info-row">
+          <dt>แหล่งข้อมูล</dt>
+          <dd><a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a> (user.csv)</dd>
+        </div>
+        <div class="info-row">
+          <dt>เงื่อนไขการกรอง</dt>
+          <dd>DMR ID ที่ขึ้นต้นด้วย <code>520</code> (ประเทศไทย) เท่านั้น</dd>
+        </div>
+        <div class="info-row">
+          <dt>เวลาในการดึงข้อมูล</dt>
+          <dd>ระบบจะดึงข้อมูลจาก RadioID.net ก็ต่อเมื่อผู้ใช้กดปุ่ม "ดึงข้อมูลล่าสุด" เท่านั้น — ไม่ดึงข้อมูลอัตโนมัติเมื่อเปิดหน้านี้</dd>
+        </div>
+        <div class="info-row">
+          <dt>การจัดเก็บข้อมูล</dt>
+          <dd>เว็บไซต์นี้<strong>ไม่เก็บรายชื่อไว้ถาวร</strong> ข้อมูลถูกประมวลผลชั่วคราวที่ Cloudflare Worker (แคชไม่เกิน 5 นาที) เท่านั้น</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="card status-card" aria-labelledby="status-heading">
+      <h2 id="status-heading">สถานะการทำงาน</h2>
+
+      <p class="connection-status" id="connection-status" data-state="checking">กำลังตรวจสอบการเชื่อมต่อ Worker...</p>
+
+      <p class="status-live" id="status-live" role="status" aria-live="polite"></p>
+
+      <progress class="progress-bar" id="progress" hidden></progress>
+
+      <div class="result-summary" id="result-summary" role="status" aria-live="polite" hidden>
+        <p class="result-count" id="result-count"></p>
+        <p class="result-time" id="result-time"></p>
+      </div>
+
+      <div class="error-banner" id="error-banner" role="alert" hidden>
+        <p class="error-message" id="error-message"></p>
+        <button type="button" class="btn btn-secondary" id="retry-btn">ลองใหม่อีกครั้ง</button>
+      </div>
+    </section>
+
+    <section class="actions" aria-label="การดำเนินการ">
+      <button type="button" class="btn btn-primary" id="fetch-btn">ดึงข้อมูลล่าสุด</button>
+      <button type="button" class="btn btn-accent" id="download-btn" disabled>ดาวน์โหลด CSV รายชื่อไทยทั้งหมด</button>
+    </section>
+
+    <section class="card sample-section" id="sample-section" aria-labelledby="sample-heading" hidden>
+      <h2 id="sample-heading">ตัวอย่างข้อมูล (สูงสุด 10 รายการแรก)</h2>
+      <div class="table-scroll">
+        <table class="sample-table">
+          <thead id="sample-thead"></thead>
+          <tbody id="sample-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      ข้อมูลต้นทางจาก <a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a>
+      เว็บไซต์นี้ไม่ใช่บริการอย่างเป็นทางการของ RadioID.net
+    </p>
+    <p>
+      <a href="https://github.com/e25xld-ham/radioid-thailand" target="_blank" rel="noopener noreferrer">ซอร์สโค้ดบน GitHub</a>
+    </p>
+  </footer>
+
+</div>
+
+<script type="module" src="assets/app.js"></script>
+</body>
+</html>
