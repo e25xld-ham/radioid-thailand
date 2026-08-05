@@ -1,10 +1,14 @@
-import { test, describe } from 'node:test';
+import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { handleRequest, resolveAllowedOrigin } from '../src/index.js';
+import worker, { handleRequest, resolveAllowedOrigin, __internal } from '../src/index.js';
 
 const ORIGIN = 'https://e25xld-ham.github.io';
 const ENV = { ALLOWED_ORIGIN: ORIGIN };
 
+// Padded well past __internal.MIN_UPSTREAM_BYTES (1024) so the new abnormal-
+// -small-file guard doesn't reject this fixture — a real RadioID export is
+// always far larger than that floor.
+const PADDING_REMARKS = 'x'.repeat(1200);
 const SAMPLE_CSV = [
   'RADIO_ID,CALLSIGN,FIRST_NAME,LAST_NAME,CITY,STATE,COUNTRY,REMARKS',
   '3101234,W1ABC,John,Smith,New York,NY,United States,',
@@ -13,8 +17,16 @@ const SAMPLE_CSV = [
   // duplicate RADIO_ID — must be deduped, first occurrence kept
   '5201234,HS1ABC-DUP,Somchai,Prasert,Bangkok,Bangkok,Thailand,',
   // COUNTRY says Thailand and LAST_NAME contains "520", but RADIO_ID does not start with 520
-  '9991234,HS999,Fake,Contains520,Thailand City,Thailand,Thailand,',
+  `9991234,HS999,Fake,Contains520,Thailand City,Thailand,Thailand,${PADDING_REMARKS}`,
 ].join('\r\n') + '\r\n';
+
+// beforeEach at file scope applies to every test below, regardless of which
+// describe() it's nested in — required because the in-flight-collapse and
+// /api/fetch cooldown state live at module scope in src/index.js and would
+// otherwise leak between tests that run milliseconds apart.
+beforeEach(() => {
+  __internal.resetForTests();
+});
 
 function makeFakeCtx() {
   const waited = [];
@@ -27,13 +39,13 @@ function makeRequest(path, { method = 'GET', origin = ORIGIN } = {}) {
   return new Request(`https://worker.example${path}`, { method, headers });
 }
 
-/** Replaces globalThis.fetch for the duration of `fn`, recording every call. */
+/** Replaces globalThis.fetch for the duration of `fn`, recording every call (url, init). */
 async function withMockedFetch(impl, fn) {
   const original = globalThis.fetch;
   const calls = [];
-  globalThis.fetch = async (...args) => {
-    calls.push(args);
-    return impl(...args);
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return impl(url, init);
   };
   try {
     return await fn(calls);
@@ -42,11 +54,37 @@ async function withMockedFetch(impl, fn) {
   }
 }
 
+/** Minimal in-memory Cache API stand-in, scoped to the duration of `fn`. */
+async function withFakeEdgeCache(fn) {
+  const original = globalThis.caches;
+  const store = new Map();
+  globalThis.caches = {
+    default: {
+      async match(request) {
+        return store.get(request.url);
+      },
+      async put(request, response) {
+        store.set(request.url, response.clone());
+      },
+    },
+  };
+  try {
+    return await fn();
+  } finally {
+    if (original === undefined) delete globalThis.caches;
+    else globalThis.caches = original;
+  }
+}
+
 function htmlErrorResponse() {
   return new Response('<!DOCTYPE html><html><body>502 Bad Gateway</body></html>', {
     status: 200,
     headers: { 'content-type': 'text/html' },
   });
+}
+
+function sampleCsvResponse(extraHeaders = {}) {
+  return new Response(SAMPLE_CSV, { status: 200, headers: { 'content-type': 'text/csv', ...extraHeaders } });
 }
 
 describe('GET /api/status', () => {
@@ -80,6 +118,7 @@ describe('method restrictions', () => {
         assert.equal(res.status, 405);
         const body = await res.json();
         assert.equal(body.ok, false);
+        assert.equal(body.error.code, 'METHOD_NOT_ALLOWED');
         assert.equal(calls.length, 0);
       },
     );
@@ -105,19 +144,57 @@ describe('security headers', () => {
     assert.equal(res.headers.get('Referrer-Policy'), 'no-referrer');
     assert.equal(res.headers.get('X-Frame-Options'), 'DENY');
     assert.ok(res.headers.get('Permissions-Policy'));
+    // "cross-origin" (not "same-origin"/"same-site") is required — GitHub
+    // Pages and the Worker are different origins by design.
+    assert.equal(res.headers.get('Cross-Origin-Resource-Policy'), 'cross-origin');
+  });
+
+  test('CORS exposes Content-Disposition and X-Cache-Status to cross-origin JS', async () => {
+    const res = await handleRequest(makeRequest('/api/status'), ENV, makeFakeCtx());
+    const exposed = res.headers.get('Access-Control-Expose-Headers') || '';
+    assert.match(exposed, /Content-Disposition/);
+    assert.match(exposed, /X-Cache-Status/);
+  });
+});
+
+describe('upstream request shape', () => {
+  test('only ever fetches https://radioid.net/static/user.csv — never the API host or path', () => {
+    assert.equal(__internal.UPSTREAM_PROTOCOL, 'https:');
+    assert.equal(__internal.UPSTREAM_HOST, 'radioid.net');
+    assert.equal(__internal.UPSTREAM_PATH, '/static/user.csv');
+    assert.equal(__internal.UPSTREAM_URL, 'https://radioid.net/static/user.csv');
+    assert.ok(!__internal.UPSTREAM_URL.includes('/api/'));
+  });
+
+  test('sends Accept, a descriptive User-Agent, and a fallback X-Client-Name header, and follows redirects', async () => {
+    await withMockedFetch(
+      () => sampleCsvResponse(),
+      async (calls) => {
+        const res = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+        assert.equal(res.status, 200);
+        assert.equal(calls.length, 1);
+        const { init } = calls[0];
+        assert.equal(init.redirect, 'follow');
+        const headers = new Headers(init.headers);
+        assert.match(headers.get('Accept') || '', /text\/csv/);
+        assert.match(headers.get('User-Agent') || '', /Thai-RadioID-Downloader/);
+        assert.equal(headers.get('X-Client-Name'), 'Thai-RadioID-Downloader');
+      },
+    );
   });
 });
 
 describe('GET /api/fetch', () => {
-  test('fetches, filters, dedupes, and returns a JSON summary', async () => {
+  test('fetches, filters, dedupes, and returns a JSON summary with X-Cache-Status: MISS', async () => {
     await withMockedFetch(
       (url) => {
         assert.ok(String(url).startsWith('https://radioid.net/static/user.csv?v='));
-        return new Response(SAMPLE_CSV, { status: 200, headers: { 'content-type': 'text/csv' } });
+        return sampleCsvResponse();
       },
       async () => {
         const res = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
         assert.equal(res.status, 200);
+        assert.equal(res.headers.get('X-Cache-Status'), 'MISS');
         const body = await res.json();
         assert.equal(body.ok, true);
         assert.equal(body.count, 2);
@@ -136,7 +213,7 @@ describe('GET /api/fetch', () => {
         const versionParam = new URL(String(url)).searchParams.get('v');
         assert.ok(versionParam && versionParam.length > 0);
         assert.notEqual(versionParam, '2026-08-05_050149.031257');
-        return new Response(SAMPLE_CSV, { status: 200, headers: { 'content-type': 'text/csv' } });
+        return sampleCsvResponse();
       },
       async () => {
         const res = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
@@ -149,7 +226,7 @@ describe('GET /api/fetch', () => {
 describe('GET /api/download', () => {
   test('returns a single CSV file with correct headers, BOM, sorting, and no duplicates', async () => {
     await withMockedFetch(
-      () => new Response(SAMPLE_CSV, { status: 200, headers: { 'content-type': 'text/csv' } }),
+      () => sampleCsvResponse(),
       async () => {
         const res = await handleRequest(makeRequest('/api/download'), ENV, makeFakeCtx());
         assert.equal(res.status, 200);
@@ -157,6 +234,7 @@ describe('GET /api/download', () => {
         assert.match(res.headers.get('Content-Disposition') || '', /^attachment; filename="radioid_thailand_520_\d{4}-\d{2}-\d{2}\.csv"$/);
         assert.equal(res.headers.get('Cache-Control'), 'no-store');
         assert.equal(res.headers.get('Access-Control-Allow-Origin'), ORIGIN);
+        assert.equal(res.headers.get('X-Cache-Status'), 'MISS');
         // A cross-origin fetch() hides Content-Disposition from JS unless the
         // server explicitly exposes it — without this, the frontend's
         // filename extraction silently falls back to a generic name.
@@ -184,12 +262,110 @@ describe('GET /api/download', () => {
 
   test('does not split output into multiple files or paginate — single response body', async () => {
     await withMockedFetch(
-      () => new Response(SAMPLE_CSV, { status: 200, headers: { 'content-type': 'text/csv' } }),
+      () => sampleCsvResponse(),
       async () => {
         const res = await handleRequest(makeRequest('/api/download'), ENV, makeFakeCtx());
         const text = await res.text();
         const dataLines = text.trim().split('\r\n').slice(1);
         assert.equal(dataLines.length, 2, 'all matching Thai records must be in the one file');
+      },
+    );
+  });
+});
+
+describe('edge cache (Cache API)', () => {
+  test('constant TTL is 30 minutes, and the cache key never embeds the upstream cache-busting timestamp', () => {
+    assert.equal(__internal.EDGE_CACHE_TTL_SECONDS, 1800);
+  });
+
+  test('first /api/fetch is a cache MISS that hits upstream; a second is a cache HIT that does not', async () => {
+    await withFakeEdgeCache(async () => {
+      await withMockedFetch(
+        () => sampleCsvResponse(),
+        async (calls) => {
+          const first = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+          assert.equal(first.headers.get('X-Cache-Status'), 'MISS');
+          const firstBody = await first.json();
+          assert.equal(firstBody.count, 2);
+          assert.equal(calls.length, 1, 'first call must hit upstream');
+
+          const second = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+          assert.equal(second.headers.get('X-Cache-Status'), 'HIT');
+          const secondBody = await second.json();
+          assert.equal(secondBody.count, 2);
+          assert.equal(calls.length, 1, 'second call must be served from cache, not hit upstream again');
+        },
+      );
+    });
+  });
+
+  test('/api/download reuses the same prepared cache /api/fetch populated', async () => {
+    await withFakeEdgeCache(async () => {
+      await withMockedFetch(
+        () => sampleCsvResponse(),
+        async (calls) => {
+          await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+          assert.equal(calls.length, 1);
+
+          const downloadRes = await handleRequest(makeRequest('/api/download'), ENV, makeFakeCtx());
+          assert.equal(downloadRes.headers.get('X-Cache-Status'), 'HIT');
+          assert.equal(calls.length, 1, '/api/download must not trigger a second upstream fetch');
+        },
+      );
+    });
+  });
+});
+
+describe('concurrent request collapse', () => {
+  test('two simultaneous /api/fetch calls on the same isolate trigger exactly one upstream fetch', async () => {
+    await withMockedFetch(
+      async () => {
+        // Yield a tick so both requests are genuinely in flight together
+        // before either upstream call resolves.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return sampleCsvResponse();
+      },
+      async (calls) => {
+        const [a, b] = await Promise.all([
+          handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx()),
+          handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx()),
+        ]);
+        assert.equal(a.status, 200);
+        assert.equal(b.status, 200);
+        assert.equal(calls.length, 1, 'concurrent requests must collapse into a single upstream fetch');
+      },
+    );
+  });
+});
+
+describe('/api/fetch cooldown (light rate limiting)', () => {
+  test('a rapid second /api/fetch after a failure gets 429 with Retry-After, without a second upstream hit', async () => {
+    await withMockedFetch(
+      () => new Response('Service Unavailable', { status: 503 }),
+      async (calls) => {
+        const first = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+        assert.equal(first.status, 502);
+        assert.equal(calls.length, 1);
+
+        const second = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+        assert.equal(second.status, 429);
+        const retryAfter = Number(second.headers.get('Retry-After'));
+        assert.ok(Number.isInteger(retryAfter) && retryAfter > 0);
+        const body = await second.json();
+        assert.equal(body.ok, false);
+        assert.equal(body.error.code, 'RATE_LIMITED');
+        assert.equal(calls.length, 1, 'the cooldown must prevent a second upstream hit');
+      },
+    );
+  });
+
+  test('/api/status is never subject to the /api/fetch cooldown', async () => {
+    await withMockedFetch(
+      () => new Response('Service Unavailable', { status: 503 }),
+      async () => {
+        await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+        const statusRes = await handleRequest(makeRequest('/api/status'), ENV, makeFakeCtx());
+        assert.equal(statusRes.status, 200);
       },
     );
   });
@@ -207,7 +383,24 @@ describe('upstream failure handling', () => {
         assert.equal(res.headers.get('Content-Type'), 'application/json; charset=utf-8');
         const body = await res.json();
         assert.equal(body.ok, false);
-        assert.ok(body.error);
+        assert.equal(body.error.code, 'UPSTREAM_NETWORK_ERROR');
+        assert.ok(body.error.message);
+      },
+    );
+  });
+
+  test('an AbortError (timeout) maps to UPSTREAM_TIMEOUT with a 504', async () => {
+    await withMockedFetch(
+      () => {
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        throw err;
+      },
+      async () => {
+        const res = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+        assert.equal(res.status, 504);
+        const body = await res.json();
+        assert.equal(body.error.code, 'UPSTREAM_TIMEOUT');
       },
     );
   });
@@ -235,6 +428,7 @@ describe('upstream failure handling', () => {
         assert.equal(res.status, 502);
         const body = await res.json();
         assert.equal(body.ok, false);
+        assert.equal(body.error.code, 'UPSTREAM_BAD_STATUS');
       },
     );
   });
@@ -252,16 +446,36 @@ describe('upstream failure handling', () => {
 
   test('an oversized Content-Length is rejected before the body is read', async () => {
     await withMockedFetch(
-      () =>
-        new Response(SAMPLE_CSV, {
-          status: 200,
-          headers: { 'content-type': 'text/csv', 'content-length': String(500 * 1024 * 1024) },
-        }),
+      () => sampleCsvResponse({ 'content-length': String(500 * 1024 * 1024) }),
       async () => {
         const res = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
         assert.notEqual(res.status, 200);
         const body = await res.json();
-        assert.equal(body.error, 'TOO_LARGE');
+        assert.equal(body.error.code, 'UPSTREAM_TOO_LARGE');
+      },
+    );
+  });
+
+  test('an abnormally small body is rejected rather than treated as valid (near-empty) data', async () => {
+    await withMockedFetch(
+      () => new Response('RADIO_ID\r\n1\r\n', { status: 200, headers: { 'content-type': 'text/csv' } }),
+      async () => {
+        const res = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+        assert.notEqual(res.status, 200);
+        const body = await res.json();
+        assert.equal(body.error.code, 'UPSTREAM_TOO_SMALL');
+      },
+    );
+  });
+
+  test('a JSON error body (e.g. an API error page) is rejected, not parsed as CSV', async () => {
+    await withMockedFetch(
+      () => new Response(JSON.stringify({ error: 'not found' }).padEnd(1200, ' '), { status: 200, headers: { 'content-type': 'application/json' } }),
+      async () => {
+        const res = await handleRequest(makeRequest('/api/fetch'), ENV, makeFakeCtx());
+        assert.notEqual(res.status, 200);
+        const body = await res.json();
+        assert.equal(body.error.code, 'UPSTREAM_HTML_RESPONSE');
       },
     );
   });
@@ -277,8 +491,9 @@ describe('resolveAllowedOrigin', () => {
     assert.equal(resolveAllowedOrigin('http://127.0.0.1:8788', ENV), 'http://127.0.0.1:8788');
   });
 
-  test('falls back to the configured default for an unrecognized origin', () => {
+  test('falls back to the configured default for an unrecognized origin (never a wildcard)', () => {
     assert.equal(resolveAllowedOrigin('https://evil.example.com', ENV), ORIGIN);
+    assert.notEqual(resolveAllowedOrigin('https://evil.example.com', ENV), '*');
   });
 
   test('supports a comma-separated ALLOWED_ORIGIN list', () => {
@@ -291,6 +506,8 @@ describe('unknown routes', () => {
   test('returns 404 JSON for an unmapped path', async () => {
     const res = await handleRequest(makeRequest('/api/does-not-exist'), ENV, makeFakeCtx());
     assert.equal(res.status, 404);
+    const body = await res.json();
+    assert.equal(body.error.code, 'NOT_FOUND');
   });
 });
 

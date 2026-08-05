@@ -43,6 +43,11 @@ async function safeJson(response) {
   }
 }
 
+/** Reads the Worker's constant error shape: { ok: false, error: { code, message } }. */
+function extractErrorMessage(body) {
+  return (body && body.error && body.error.message) || null;
+}
+
 function triggerBlobDownload(doc, urlImpl, blob, filename) {
   const objectUrl = urlImpl.createObjectURL(blob);
   const link = doc.createElement('a');
@@ -195,7 +200,7 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
       const res = await fetchImpl(`${config.API_BASE_URL}/api/fetch`);
       const body = await safeJson(res);
       if (!res.ok || !body || body.ok !== true) {
-        throw new Error((body && body.message) || `ไม่สามารถดึงข้อมูลได้ (HTTP ${res.status})`);
+        throw new Error(extractErrorMessage(body) || `ไม่สามารถดึงข้อมูลได้ (HTTP ${res.status})`);
       }
       state.downloadReady = true;
       renderResult(body);
@@ -224,7 +229,7 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
       const res = await fetchImpl(`${config.API_BASE_URL}/api/download`);
       if (!res.ok) {
         const body = await safeJson(res);
-        throw new Error((body && body.message) || `ดาวน์โหลดไม่สำเร็จ (HTTP ${res.status})`);
+        throw new Error(extractErrorMessage(body) || `ดาวน์โหลดไม่สำเร็จ (HTTP ${res.status})`);
       }
       const blob = await res.blob();
       const filename =

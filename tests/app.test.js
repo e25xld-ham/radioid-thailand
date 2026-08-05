@@ -97,7 +97,7 @@ describe('download button gating', () => {
       const u = String(url);
       if (u.includes('/api/fetch')) {
         if (mode === 'fail') {
-          return { ok: false, status: 502, json: async () => ({ ok: false, error: 'BAD_STATUS', message: 'ผิดพลาด' }) };
+          return { ok: false, status: 502, json: async () => ({ ok: false, error: { code: 'UPSTREAM_BAD_STATUS', message: 'ผิดพลาด' } }) };
         }
         return {
           ok: true,
