@@ -4,8 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Thai RadioID Downloader</title>
-<meta name="description" content="ดาวน์โหลดรายชื่อ DMR ID ประเทศไทยล่าสุดจาก RadioID.net เฉพาะหมายเลขที่ขึ้นต้นด้วย 520 เป็นไฟล์ CSV เดียว" />
+<meta name="description" content="ดาวน์โหลดรายชื่อ DMR ID ประเทศไทยล่าสุดจาก RadioID.net เป็น CSV ทั่วไปหรือไฟล์พร้อมนำเข้า AnyTone D878UV/D578UV" />
 <link rel="stylesheet" href="assets/style.css" />
+<link rel="stylesheet" href="assets/formats.css" />
 </head>
 <body>
 <div class="page">
@@ -25,16 +26,22 @@
       <p class="release-badge">Release 2026.08</p>
     </div>
 
-    <section class="hero-actions" aria-label="การดำเนินการหลัก">
+    <section class="hero-actions format-actions" aria-label="การดำเนินการหลัก">
       <button type="button" class="action-card action-primary" id="fetch-btn">
         <span class="action-icon" aria-hidden="true">↓</span>
         <span><strong>ดึงข้อมูลล่าสุด</strong><small>Fetch Latest Database</small></span>
       </button>
       <button type="button" class="action-card action-secondary" id="download-btn" disabled>
         <span class="action-icon" aria-hidden="true">⇩</span>
-        <span><strong>ดาวน์โหลด CSV</strong><small>Download CSV File</small></span>
+        <span><strong>ดาวน์โหลด RadioID CSV</strong><small>Original filtered columns</small></span>
+      </button>
+      <button type="button" class="action-card action-anytone" id="anytone-download-btn" disabled>
+        <span class="action-icon" aria-hidden="true">A</span>
+        <span><strong>ดาวน์โหลดสำหรับ AnyTone</strong><small>D878UV / D578UV CPS</small></span>
       </button>
     </section>
+
+    <p class="format-note">ไฟล์ AnyTone จะจัดลำดับคอลัมน์ใหม่ให้ตรงกับ Digital Contact List ของ CPS โดยอัตโนมัติ</p>
   </header>
 
   <main>
@@ -71,7 +78,8 @@
         <dl class="info-list">
           <div><dt>แหล่งข้อมูล</dt><dd><a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a> (user.csv)</dd></div>
           <div><dt>เงื่อนไขการกรอง</dt><dd>DMR ID ที่ขึ้นต้นด้วย <code>520</code> (ประเทศไทย)</dd></div>
-          <div><dt>เวลาในการดึงข้อมูล</dt><dd>ระบบจะดึงข้อมูลเมื่อผู้ใช้กดปุ่ม “ดึงข้อมูลล่าสุด” เท่านั้น</dd></div>
+          <div><dt>RadioID CSV</dt><dd>คงหัวคอลัมน์จากต้นทาง เหมาะสำหรับใช้งานทั่วไป</dd></div>
+          <div><dt>AnyTone CSV</dt><dd>จัดรูปแบบสำหรับ Digital Contact List ของ D878UV / D578UV CPS</dd></div>
           <div><dt>การจัดเก็บข้อมูล</dt><dd>ไม่เก็บรายชื่อถาวร ประมวลผลชั่วคราวและแคชไม่เกิน 30 นาที</dd></div>
         </dl>
       </section>
@@ -111,12 +119,7 @@
   </main>
 
   <footer class="site-footer">
-    <p>
-      Designed &amp; Developed by
-      <a href="https://www.qrz.com/db/E25XLD" target="_blank" rel="noopener noreferrer"><strong>E25XLD</strong></a>
-      (also
-      <a href="https://www.qrz.com/db/KE9CYN" target="_blank" rel="noopener noreferrer"><strong>KE9CYN</strong></a>)
-    </p>
+    <p>Designed &amp; Developed by <a href="https://www.qrz.com/db/E25XLD" target="_blank" rel="noopener noreferrer"><strong>E25XLD</strong></a> (also <a href="https://www.qrz.com/db/KE9CYN" target="_blank" rel="noopener noreferrer"><strong>KE9CYN</strong></a>)</p>
     <p>Data courtesy of <a href="https://radioid.net" target="_blank" rel="noopener noreferrer">RadioID.net</a></p>
     <p>This website is not affiliated with RadioID.net.</p>
     <p><a href="https://github.com/e25xld-ham/radioid-thailand" target="_blank" rel="noopener noreferrer">Source Code on GitHub</a></p>
