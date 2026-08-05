@@ -3,7 +3,7 @@
 // The Worker URL lives in exactly one place: CONFIG.API_BASE_URL below.
 // Nothing else in this file (or index.html) hard-codes the Worker origin.
 export const CONFIG = {
-  API_BASE_URL: 'https://REPLACE-WITH-WORKER.workers.dev',
+  API_BASE_URL: 'https://radioid-thailand-api.e25xld.workers.dev',
 };
 
 /** Formats an ISO timestamp as a Thai (Buddhist-era) date/time in Asia/Bangkok time. */
