@@ -1,0 +1,20 @@
+# Copy this file to wrangler.toml before deploying:
+#   cp wrangler.toml.example wrangler.toml
+#
+# wrangler.toml is gitignored on purpose — do not commit account_id, routes,
+# or any secret values. This Worker does not use secrets, tokens, or a
+# database; ALLOWED_ORIGIN below is the only configuration it needs.
+
+name = "radioid-thailand-api"
+main = "src/index.js"
+compatibility_date = "2026-08-05"
+workers_dev = true
+
+[vars]
+# Comma-separated list of origins allowed to call this API's JSON endpoints.
+# localhost / 127.0.0.1 (any port) are always allowed for local development,
+# regardless of this value.
+ALLOWED_ORIGIN = "https://e25xld-ham.github.io"
+
+# If you later attach a custom domain, add it here, e.g.:
+# ALLOWED_ORIGIN = "https://e25xld-ham.github.io,https://radioid-th.example.com"

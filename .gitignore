@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+worker/node_modules/
+
+# Cloudflare Wrangler local config and state (contains no secrets by policy,
+# but must never be committed — copy worker/wrangler.toml.example instead)
+wrangler.toml
+worker/wrangler.toml
+.wrangler/
+worker/.wrangler/
+.dev.vars
+worker/.dev.vars
+
+# Never commit any downloaded RadioID data
+user.csv
+*.csv
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs
+npm-debug.log*
+*.log
+
+# Env files
+.env
+.env.*
