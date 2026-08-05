@@ -1,12 +1,8 @@
 // Thai RadioID Downloader — frontend logic.
-//
-// The Worker URL lives in exactly one place: CONFIG.API_BASE_URL below.
-// Nothing else in this file (or index.html) hard-codes the Worker origin.
 export const CONFIG = {
   API_BASE_URL: 'https://radioid-thailand-api.e25xld.workers.dev',
 };
 
-/** Formats an ISO timestamp as a Thai (Buddhist-era) date/time in Asia/Bangkok time. */
 export function formatBangkokDateTime(isoString) {
   if (!isoString) return '-';
   const date = new Date(isoString);
@@ -19,14 +15,12 @@ export function formatBangkokDateTime(isoString) {
   return `${formatted} น. (เวลาไทย)`;
 }
 
-/** Formats a count with Thai-locale thousands separators, e.g. 2221 -> "2,221". */
 export function formatThaiNumber(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return String(value);
   return n.toLocaleString('th-TH');
 }
 
-/** Pulls the filename out of a Content-Disposition: attachment header value. */
 export function extractFilenameFromContentDisposition(headerValue) {
   if (!headerValue) return null;
   const quoted = /filename="([^"]+)"/i.exec(headerValue);
@@ -36,14 +30,9 @@ export function extractFilenameFromContentDisposition(headerValue) {
 }
 
 async function safeJson(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
+  try { return await response.json(); } catch { return null; }
 }
 
-/** Reads the Worker's constant error shape: { ok: false, error: { code, message } }. */
 function extractErrorMessage(body) {
   return (body && body.error && body.error.message) || null;
 }
@@ -60,22 +49,34 @@ function triggerBlobDownload(doc, urlImpl, blob, filename) {
   setTimeout(() => urlImpl.revokeObjectURL(objectUrl), 2000);
 }
 
-/**
- * Builds the app's behavior wired to an injected `document`-like object and
- * `fetch` implementation, so it can run both in a real browser and under
- * `node --test` with lightweight stubs — without ever touching the network
- * or a real DOM during tests.
- */
+function formatDashboardDate(isoString) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return { date: '-', time: '-' };
+  return {
+    date: new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', year: 'numeric',
+    }).format(date),
+    time: `${new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(date)} ICT`,
+  };
+}
+
 export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
   const els = {
     fetchBtn: doc.getElementById('fetch-btn'),
     downloadBtn: doc.getElementById('download-btn'),
     connectionStatus: doc.getElementById('connection-status'),
+    workerMini: doc.getElementById('worker-mini'),
+    workerMiniLabel: doc.getElementById('worker-mini-label'),
     statusLive: doc.getElementById('status-live'),
     progress: doc.getElementById('progress'),
     resultSummary: doc.getElementById('result-summary'),
     resultCount: doc.getElementById('result-count'),
     resultTime: doc.getElementById('result-time'),
+    statCount: doc.getElementById('stat-count'),
+    statDate: doc.getElementById('stat-date'),
+    statTime: doc.getElementById('stat-time'),
     errorBanner: doc.getElementById('error-banner'),
     errorMessage: doc.getElementById('error-message'),
     retryBtn: doc.getElementById('retry-btn'),
@@ -84,9 +85,7 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
     sampleTbody: doc.getElementById('sample-tbody'),
   };
 
-  const state = { isFetching: false, isDownloading: false, downloadReady: false };
-
-  // Requirement: the download button stays disabled until /api/fetch succeeds.
+  const state = { isFetching: false, isDownloading: false, downloadReady: false, count: null };
   if (els.downloadBtn) els.downloadBtn.disabled = true;
 
   function updateButtonStates() {
@@ -106,41 +105,47 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
   }
 
   function setConnectionStatus(kind) {
-    if (!els.connectionStatus) return;
     const labels = {
       checking: 'กำลังตรวจสอบการเชื่อมต่อ Worker...',
       online: 'เชื่อมต่อ Worker สำเร็จ พร้อมใช้งาน',
       offline: 'ไม่สามารถเชื่อมต่อ Worker ได้ในขณะนี้',
     };
-    els.connectionStatus.textContent = labels[kind] || '';
-    els.connectionStatus.dataset.state = kind;
+    if (els.connectionStatus) {
+      els.connectionStatus.textContent = labels[kind] || '';
+      els.connectionStatus.dataset.state = kind;
+    }
+    if (els.workerMini) els.workerMini.dataset.state = kind;
+    if (els.workerMiniLabel) {
+      els.workerMiniLabel.textContent = kind === 'online' ? 'ONLINE' : kind === 'offline' ? 'OFFLINE' : 'CHECKING';
+    }
   }
 
   function showProgress(message) {
     if (els.progress) els.progress.hidden = false;
     setStatusMessage(message);
   }
-
-  function hideProgress() {
-    if (els.progress) els.progress.hidden = true;
-  }
-
+  function hideProgress() { if (els.progress) els.progress.hidden = true; }
   function showError(message) {
     if (els.errorBanner) els.errorBanner.hidden = false;
     if (els.errorMessage) els.errorMessage.textContent = message;
   }
-
-  function hideError() {
-    if (els.errorBanner) els.errorBanner.hidden = true;
-  }
+  function hideError() { if (els.errorBanner) els.errorBanner.hidden = true; }
 
   function renderResult(body) {
+    const countText = formatThaiNumber(body.count);
+    const dashboardTime = formatDashboardDate(body.fetchedAt);
+    state.count = body.count;
+
     if (els.resultSummary) els.resultSummary.hidden = false;
-    if (els.resultCount) {
-      els.resultCount.textContent = `พบรายชื่อ DMR ID ประเทศไทย ${formatThaiNumber(body.count)} รายชื่อ`;
-    }
-    if (els.resultTime) {
-      els.resultTime.textContent = `ดึงข้อมูลล่าสุดเมื่อ ${formatBangkokDateTime(body.fetchedAt)}`;
+    if (els.resultCount) els.resultCount.textContent = `พบรายชื่อ DMR ID ประเทศไทย ${countText} รายชื่อ`;
+    if (els.resultTime) els.resultTime.textContent = `ดึงข้อมูลล่าสุดเมื่อ ${formatBangkokDateTime(body.fetchedAt)}`;
+    if (els.statCount) els.statCount.textContent = countText;
+    if (els.statDate) els.statDate.textContent = dashboardTime.date;
+    if (els.statTime) els.statTime.textContent = dashboardTime.time;
+
+    if (els.downloadBtn) {
+      const title = els.downloadBtn.querySelector('strong');
+      if (title) title.textContent = `ดาวน์โหลด CSV (${countText})`;
     }
   }
 
@@ -148,12 +153,10 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
     if (!els.sampleSection || !els.sampleThead || !els.sampleTbody) return;
     const columns = Array.isArray(body.columns) ? body.columns : [];
     const sample = Array.isArray(body.sample) ? body.sample : [];
-
     if (columns.length === 0 || sample.length === 0) {
       els.sampleSection.hidden = true;
       return;
     }
-
     const headRow = doc.createElement('tr');
     columns.forEach((col) => {
       const th = doc.createElement('th');
@@ -162,7 +165,6 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
     });
     els.sampleThead.textContent = '';
     els.sampleThead.appendChild(headRow);
-
     els.sampleTbody.textContent = '';
     sample.forEach((row) => {
       const tr = doc.createElement('tr');
@@ -173,7 +175,6 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
       });
       els.sampleTbody.appendChild(tr);
     });
-
     els.sampleSection.hidden = false;
   }
 
@@ -195,7 +196,6 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
     updateButtonStates();
     hideError();
     showProgress('กำลังดาวน์โหลดและประมวลผลฐานข้อมูล RadioID กรุณารอสักครู่...');
-
     try {
       const res = await fetchImpl(`${config.API_BASE_URL}/api/fetch`);
       const body = await safeJson(res);
@@ -205,8 +205,6 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
       state.downloadReady = true;
       renderResult(body);
       renderSample(body);
-      // result-summary itself is an aria-live region (see renderResult), so
-      // the transient status line is cleared rather than repeating the count.
       setStatusMessage('');
     } catch (err) {
       showError((err && err.message) || 'ไม่สามารถดึงข้อมูลจาก RadioID.net ได้ กรุณาลองใหม่อีกครั้ง');
@@ -224,7 +222,6 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
     updateButtonStates();
     hideError();
     setStatusMessage('กำลังเตรียมไฟล์ CSV สำหรับดาวน์โหลด...');
-
     try {
       const res = await fetchImpl(`${config.API_BASE_URL}/api/download`);
       if (!res.ok) {
@@ -232,8 +229,7 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
         throw new Error(extractErrorMessage(body) || `ดาวน์โหลดไม่สำเร็จ (HTTP ${res.status})`);
       }
       const blob = await res.blob();
-      const filename =
-        extractFilenameFromContentDisposition(res.headers.get('Content-Disposition')) || 'radioid_thailand_520.csv';
+      const filename = extractFilenameFromContentDisposition(res.headers.get('Content-Disposition')) || 'radioid_thailand_520.csv';
       triggerBlobDownload(doc, urlImpl, blob, filename);
       setStatusMessage('ดาวน์โหลดไฟล์ CSV สำเร็จ');
     } catch (err) {
@@ -248,12 +244,9 @@ export function createApp({ doc, fetchImpl, config = CONFIG, urlImpl }) {
   if (els.fetchBtn) els.fetchBtn.addEventListener('click', fetchLatest);
   if (els.downloadBtn) els.downloadBtn.addEventListener('click', downloadCsv);
   if (els.retryBtn) els.retryBtn.addEventListener('click', fetchLatest);
-
   return { checkStatus, fetchLatest, downloadCsv, els, state };
 }
 
-// Real-browser bootstrap. Page load calls /api/status ONLY — /api/fetch runs
-// solely in response to the "ดึงข้อมูลล่าสุด" button click.
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => {
     const app = createApp({ doc: document, fetchImpl: fetch, config: CONFIG, urlImpl: URL });
