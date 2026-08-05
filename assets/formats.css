@@ -1,0 +1,39 @@
+/* Download-format controls */
+.format-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.action-anytone {
+  border-color: rgba(139, 92, 246, .78);
+  background: linear-gradient(145deg, rgba(92, 49, 160, .34), rgba(12, 25, 43, .94));
+  color: #efe7ff;
+}
+
+.action-anytone:hover:not(:disabled),
+.action-anytone:focus-visible:not(:disabled) {
+  border-color: #a78bfa;
+  box-shadow: 0 14px 34px rgba(124, 58, 237, .24);
+  transform: translateY(-1px);
+}
+
+.action-anytone .action-icon {
+  border: 1px solid rgba(167, 139, 250, .6);
+  color: #c4b5fd;
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.format-note {
+  max-width: 760px;
+  margin: 14px auto 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: .84rem;
+}
+
+@media (max-width: 840px) {
+  .format-actions {
+    grid-template-columns: 1fr;
+  }
+}
