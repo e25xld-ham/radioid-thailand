@@ -107,6 +107,27 @@
       </section>
     </section>
 
+    <section class="panel json-panel" aria-labelledby="json-heading">
+      <h2 id="json-heading">users.json สำหรับ Z3DMR</h2>
+      <p>เลือกไฟล์ RadioID หรือ users.json เดิม ระบบจะเก็บเฉพาะ DMR ID ประเทศไทย (520xxxx) แล้วให้ดาวน์โหลดไฟล์ใหม่ได้ทันที</p>
+      <p><a href="https://www.radioid.net/static/users.json">เปิดไฟล์ต้นทาง RadioID</a> · <a href="assets/sync-thai-users.py" download>ดาวน์โหลดสคริปต์ตั้งรอบซิงก์</a></p>
+      <form id="json-form">
+        <label>ไฟล์ต้นฉบับ <input type="file" name="source" accept=".json,application/json" required /></label>
+        <details>
+          <summary>เพิ่ม DMR ID ที่ RadioID อนุมัติแล้ว</summary>
+          <div class="json-fields">
+            <label>DMR ID <input name="id" inputmode="numeric" pattern="520[0-9]{4}" placeholder="5202348" /></label>
+            <label>Callsign <input name="callsign" pattern="[A-Za-z0-9]{3,12}" /></label>
+            <label>ชื่อ <input name="name" /></label>
+            <label>อำเภอ / เมือง <input name="city" /></label>
+            <label>จังหวัด <input name="state" /></label>
+          </div>
+        </details>
+        <button type="submit" class="action-card action-primary">ดาวน์โหลด users.json</button>
+        <p id="json-status" role="status"></p>
+      </form>
+    </section>
+
     <section class="panel sample-section" id="sample-section" aria-labelledby="sample-heading" hidden>
       <h2 id="sample-heading">ตัวอย่างข้อมูล (สูงสุด 10 รายการแรก)</h2>
       <div class="table-scroll">
@@ -127,5 +148,6 @@
   </footer>
 </div>
 <script type="module" src="assets/app.js"></script>
+<script type="module" src="assets/thai-users.js"></script>
 </body>
 </html>
