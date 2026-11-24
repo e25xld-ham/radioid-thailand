@@ -37,3 +37,12 @@
     grid-template-columns: 1fr;
   }
 }
+
+.json-panel { margin-top: 18px; }
+.json-panel form, .json-fields { display: grid; gap: 12px; }
+.json-fields { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); margin-top: 12px; }
+.json-panel label { display: grid; gap: 5px; }
+.json-panel input { color: inherit; background: transparent; border: 1px solid #64748b; border-radius: 8px; padding: 8px; min-width: 0; }
+.json-panel summary { cursor: pointer; }
+.json-panel button { justify-self: start; }
+.json-panel #json-status { margin: 0; }
